@@ -26,15 +26,20 @@
 
 -export([start_link/3,
          access_token/1, refresh_token/1,
-         home_timeline/2, user_timeline_2,
+         home_timeline/2, user_timeline/2,
          update/2, reshare/2, delete/2,
-         comment/2, comment_list/1, 
+         comment/2, comment_list/1, get_comment/1, delete_comment/2,
+         follow/2, unfollow/2, block/2,
+         search_user/1
        ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
 -record(state, {appkey, secret, uri, table}). 
+
+-define(HttpAPI, "http://api.douban.com/v2").
+-define(HttpsAPI, "https://api.douban.com/v2").
 
 %%-----------------------------------------------------------------------------
 %%  API
@@ -65,15 +70,16 @@ reshare(Code, StatId) ->
     gen_server:call(?MODULE, {reshare, Code, StatId}).
     
 delete(Code, StatId) ->
-    gen_server:call(?MODULE, {delete, StatId}).
+    gen_server:call(?MODULE, {delete, Code, StatId}).
 
 comment(Code, Text) ->
     gen_server:call(?MODULE, {comment, Code, Text}).
 
-commmet_list(StatId) ->
+comment_list(StatId) ->
     gen_server:call(?MODULE, {comment_list, StatId}).
 
-
+get_comment(CommId) ->
+    gen_server:call(?MODULE, {get_comment, CommId}).
 
 delete_comment(Code, CommId) ->
     gen_server:call(?MODULE, {delete_comment, Code, CommId}).
@@ -95,12 +101,18 @@ search_user(Text) ->
 %%-----------------------------------------------------------------------------
 init([AppKey, Secret, URI]) ->
     ok = inets:start(),
-    ssl:start(),
+    ok = ssl:start(),
+    % ets_key()   -> access_code()
+    % ets_value() -> {userid(), access_token(), refresh_token(), expire()}
     T = ets:new(anonyms, [set, private]),
     {ok, #state{appkey=AppKey, secret=Secret, uri=URI, table=T}}.
 
-handle_call(_Request, _From, State) ->
-    Reply = ok,
+handle_call({access_token, Code}, _From, State) ->
+    #state{appkey=AppKey, secret=Secret, uri=URI} = State,
+    Request = "https://www.douban.com/service/auth2/token?client_id=" ++
+              AppKey ++ "&client_secret=" ++ Secret ++ "&redirect_uri=" ++
+              URI ++ "&grant_type=authorization_code&code=" ++ Code,
+    Reply = httpc:request(post, {Request, []}, [], []),
     {reply, Reply, State}.
 
 handle_cast(_Msg, State) ->

@@ -1,3 +1,4 @@
+%% This code is from https://github.com/davisp/ejson
 
 -module(ejson_encode).
 
