@@ -29,20 +29,23 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {apikey, secret, uri}). 
+-record(state, {code}). 
 
+-define(TokenTbl, douban_token_table).
 -define(HttpApi, "http://api.douban.com/").
 -define(HttpsApi, "https://api.douban.com/").
--define(TokenTbl, douban_token_table).
+-define(Apikey, "0c7a9b3c6305f6b4256fd1b52911e41c").
+-define(Secret, "ce9e5a76d5fc4f83").
+-define(Uri, "http://222.201.177.33:9000").
 
 %%-----------------------------------------------------------------------------
 %%  API
 %%-----------------------------------------------------------------------------
-start_link({Apikey, Secret, Uri}) ->
-    start_link(?MODULE, {Apikey, Secret, Uri}).
+start_link(Code) ->
+    start_link(?MODULE, Code).
 
-start_link(Server, {Apikey, Secret, Uri}) when is_atom(Server) ->
-    gen_server:start_link({local,Server}, ?MODULE, [Apikey,Secret,Uri], []).
+start_link(Server, Code) ->
+    gen_server:start_link({local, Server}, ?MODULE, [Code], []).
 
 call(Request) when is_tuple(Request) ->
     gen_server:call(?MODULE, Request).
@@ -53,7 +56,7 @@ call(Server, Request) when is_tuple(Request) ->
 %%-----------------------------------------------------------------------------
 %%  Callback
 %%-----------------------------------------------------------------------------
-init([Apikey, Secret, Uri]) ->
+init([Code]) ->
     inets:start(),
     ssl:start(),
     case lists:member(?TokenTbl, ets:all()) of
@@ -62,14 +65,14 @@ init([Apikey, Secret, Uri]) ->
         false -> ets:new(?TokenTbl, [named_table, set, public]);
         true -> pass
     end,
-    {ok, #state{apikey=Apikey, secret=Secret, uri=Uri}}.
+    {ok, #state{code=Code}}.
 
 %%-----------------------------------------------------------------------------
-handle_call({access_token, Code}, _From, State) ->
-    #state{apikey=Apikey, secret=Secret, uri=Uri} = State,
+handle_call({access_token}, _From, State) ->
+    #state{code=Code} = State,
     Url = "https://www.douban.com/service/auth2/token",
-    Body = "client_id=" ++ Apikey ++ "&client_secret=" ++ Secret ++ 
-           "&redirect_uri=" ++ Uri ++ "&grant_type=authorization_code&code=" 
+    Body = "client_id=" ++ ?Apikey ++ "&client_secret=" ++ ?Secret ++ 
+           "&redirect_uri=" ++ ?Uri ++ "&grant_type=authorization_code&code=" 
            ++ Code,
     Result = request("", Url, Body), 
     Reply = case Result of
@@ -78,14 +81,14 @@ handle_call({access_token, Code}, _From, State) ->
     end,
     {reply, Reply, State};
 
-handle_call({refresh_token, Code}, _From, State) ->
-    #state{apikey=Apikey, secret=Secret, uri=Uri} = State,
+handle_call({refresh_token}, _From, State) ->
+    #state{code=Code} = State,
     case ets:lookup(?TokenTbl, Code) of
         [] -> handle_call({access_token, Code}, self(), State);
         [{Code, {_, _, Rtk}}] -> 
             Url = "https://www.douban.com/service/auth2/token",
-            Body = "client_id=" ++ Apikey ++ "&client_secret=" ++ 
-                   Secret ++ "&redirect_uri=" ++ Uri ++ 
+            Body = "client_id=" ++ ?Apikey ++ "&client_secret=" ++ 
+                   ?Secret ++ "&redirect_uri=" ++ ?Uri ++ 
                    "&grant_type=refresh_token&refresh_token=" ++ Rtk,
             Result = request("", Url, Body),
             Reply = case Result of 
@@ -95,7 +98,8 @@ handle_call({refresh_token, Code}, _From, State) ->
             {reply, Reply, State}
     end;
 
-handle_call({home_timeline, Code, N}, _From, State) ->
+handle_call({home_timeline, N}, _From, State) ->
+    #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> no_access_token;
         [{Code, {_, Atk, _}}] ->
@@ -104,7 +108,8 @@ handle_call({home_timeline, Code, N}, _From, State) ->
     end,
     {reply, Reply, State};
 
-handle_call({home_timeline, Code, N, MaxId}, _From, State) ->
+handle_call({home_timeline, N, MaxId}, _From, State) ->
+    #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> no_access_token;
         [{Code, {_, Atk, _}}] ->
@@ -114,7 +119,8 @@ handle_call({home_timeline, Code, N, MaxId}, _From, State) ->
     end,
     {reply, Reply, State};
 
-handle_call({user_timeline, Code, User, N}, _From, State) ->
+handle_call({user_timeline, User, N}, _From, State) ->
+    #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> no_access_token;
         [{Code, {_, Atk, _}}] ->
@@ -123,7 +129,8 @@ handle_call({user_timeline, Code, User, N}, _From, State) ->
     end,
     {reply, Reply, State};
 
-handle_call({user_timeline, Code, User, N, MaxId}, _From, State) ->
+handle_call({user_timeline, User, N, MaxId}, _From, State) ->
+    #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> no_access_token;
         [{Code, {_, Atk, _}}] ->
@@ -133,7 +140,8 @@ handle_call({user_timeline, Code, User, N, MaxId}, _From, State) ->
     end,
     {reply, Reply, State};
 
-handle_call({reshare, Code, StatId}, _From, State) ->
+handle_call({reshare, StatId}, _From, State) ->
+    #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> no_access_token;
         [{Code, {_, Atk, _}}] ->
@@ -142,11 +150,22 @@ handle_call({reshare, Code, StatId}, _From, State) ->
     end,
     {reply, Reply, State};
 
-handle_call({delete, Code, StatId}, _From, State) ->
+handle_call({delete, StatId}, _From, State) ->
+    #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> no_access_token;
         [{Code, {_, Atk, _}}] ->
             delete(Atk, ?HttpsApi ++ "shuo/v2/statuses/" 
+                   ++ integer_to_list(StatId))
+    end,
+    {reply, Reply, State};
+
+handle_call({comment, StatId, Text}, _From, State) ->
+    #state{code=Code} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> no_access_token;
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi ++ "shuo/v2/statuses/" 
                    ++ integer_to_list(StatId))
     end,
     {reply, Reply, State}.
