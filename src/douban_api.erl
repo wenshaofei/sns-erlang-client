@@ -140,6 +140,15 @@ handle_call({reshare, Code, StatId}, _From, State) ->
             request(Atk, ?HttpsApi ++ "shuo/v2/statuses/"
                     ++ integer_to_list(StatId) ++ "/reshare", "")
     end,
+    {reply, Reply, State};
+
+handle_call({delete, Code, StatId}, _From, State) ->
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> no_access_token;
+        [{Code, {_, Atk, _}}] ->
+            delete(Atk, ?HttpsApi ++ "shuo/v2/statuses/" 
+                   ++ integer_to_list(StatId))
+    end,
     {reply, Reply, State}.
 
 %%-----------------------------------------------------------------------------
@@ -181,6 +190,15 @@ request(Token, Url) ->
         X -> {error, X}
     end.
 
+delete(Token, Url) ->
+    Header = [{"Authorization", "Bearer "++Token}],
+    Result = httpc:request(delete, {Url,Header}, [], [{full_result,false}]),
+    case Result of
+        {ok, {200, Json}} -> {json, Json};
+        {ok, X} -> {error, X};
+        X -> {error, X}
+    end.
+
 save_token(Code, Json) ->
     {[{_,_Atk},{_,_Uid},{_,_},{_,_Rtk}]} = mochijson2:decode(Json),
     Uid = bitstring_to_list(_Uid),
@@ -194,12 +212,6 @@ save_token(Code, Json) ->
 %              {title, Title} | {url, Url}     | {desc, Desc}
 update(Code, Content) when is_list(Content) ->
     gen_server:call(?MODULE, {update, Code, Content}).
-    
-reshare(Code, StatId) ->
-    gen_server:call(?MODULE, {reshare, Code, StatId}).
-    
-delete(Code, StatId) ->
-    gen_server:call(?MODULE, {delete, Code, StatId}).
 
 comment(Code, Text) ->
     gen_server:call(?MODULE, {comment, Code, Text}).
