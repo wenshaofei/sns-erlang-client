@@ -75,6 +75,23 @@ handle_call({access_token, Code}, _From, State) ->
         {error, X} -> {error, X};
         Json -> save_token(Code, Json)  % {json, Json}
     end,
+    {reply, Reply, State};
+
+handle_call({refresh_token, Code}, _From, State) ->
+    #state{appkey=AppKey, secret=Secret, uri=Uri} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> gen_server:call(self(), {access_token, Code});
+        [{Code, {_, _, Rtk}}] -> 
+            Url = "https://www.douban.com/service/auth2/token",
+            Body = "client_id=" ++ AppKey ++ "&client_secret=" ++ 
+                   Secret ++ "&redirect_uri=" ++ Uri ++ 
+                   "&grant_type=refresh_token&refresh_token=" ++ Rtk,
+            Result = request(post, Url, Body),
+            case Result of 
+                {error, X} -> {error, X};
+                Json -> save_token(Code, Json)  % {json, Json}
+            end
+    end,
     {reply, Reply, State}.
 
 handle_cast(_Msg, State) ->
@@ -111,9 +128,6 @@ save_token(Code, Json) ->
     Rtk = bitstring_to_list(_Rtk),
     ets:insert(?TokenTbl, {Code, {Uid, Atk, Rtk}}),
     {json, Json}.
-
-refresh_token(Code) ->
-    gen_server:call(?MODULE, {refresh_token, Code}).
 
 % home_timeline(Token, [1, 50]) will return 50 newest statuses
 home_timeline(Token, [A, B]) ->
