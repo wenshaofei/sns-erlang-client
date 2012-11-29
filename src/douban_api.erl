@@ -24,31 +24,93 @@
 
 -behaviour(gen_server).
 
--export([start_link/3,
-         access_token/1, refresh_token/1,
-         home_timeline/2, user_timeline/2,
-         update/2, reshare/2, delete/2,
-         comment/2, comment_list/1, get_comment/1, delete_comment/2,
-         follow/2, unfollow/2, block/2,
-         search_user/1
-       ]).
+-export([start_link/1, start_link/2, call/1, call/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {appkey, secret, uri, table}). 
+-record(state, {appkey, secret, uri}). 
 
 -define(HttpAPI, "http://api.douban.com/v2").
 -define(HttpsAPI, "https://api.douban.com/v2").
+-define(TokenTbl, douban_token_table).
 
 %%-----------------------------------------------------------------------------
 %%  API
 %%-----------------------------------------------------------------------------
-start_link(AppKey, Secret, URI) ->
-    gen_server:start_link(?MODULE, [AppKey, Secret, URI], []).
+start_link({AppKey, Secret, Uri}) ->
+    start_link(?MODULE, {AppKey, Secret, Uri}).
 
-access_token(Code) -> 
-    gen_server:call(?MODULE, {access_token, Code}).
+start_link(Server, {AppKey, Secret, Uri}) when is_atom(Server) ->
+    gen_server:start_link({local,Server}, ?MODULE, [AppKey,Secret,Uri], []).
+
+call(Request) when is_tuple(Request) ->
+    gen_server:call(?MODULE, Request).
+
+call(Server, Request) when is_tuple(Request) ->
+    gen_server:call(Server, Request).
+    
+%%-----------------------------------------------------------------------------
+%%  Callback
+%%-----------------------------------------------------------------------------
+init([AppKey, Secret, Uri]) ->
+    inets:start(),
+    ssl:start(),
+    case lists:member(?TokenTbl, ets:all()) of
+        % key()   -> access_code()
+        % value() -> {userid(), access_token(), refresh_token()}
+        false -> ets:new(?TokenTbl, [named_table, set, public]);
+        true -> pass
+    end,
+    {ok, #state{appkey=AppKey, secret=Secret, uri=Uri}}.
+
+handle_call({access_token, Code}, _From, State) ->
+    #state{appkey=AppKey, secret=Secret, uri=Uri} = State,
+    Url = "https://www.douban.com/service/auth2/token",
+    Body = "client_id=" ++ AppKey ++ "&client_secret=" ++ Secret ++ 
+           "&redirect_uri=" ++ Uri ++ "&grant_type=authorization_code&code=" 
+           ++ Code,
+    Result = request(post, Url, Body), 
+    Reply = case Result of
+        {error, X} -> {error, X};
+        Json -> save_token(Code, Json)  % {json, Json}
+    end,
+    {reply, Reply, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%-----------------------------------------------------------------------------
+%%  Internal
+%%-----------------------------------------------------------------------------
+request(get, Url) ->
+    httpc:request(get, {Url,[]}, [], []).
+
+request(post, Url, Body) ->
+    Result = httpc:request(post, 
+             {Url,[],"application/x-www-form-urlencoded",Body},
+             [], [{full_result,false}]),
+    case Result of
+        {ok,{200, Json}} -> Json;
+        X -> {error, X}
+    end.
+
+save_token(Code, Json) ->
+    {[{_,_Atk},{_,_Uid},{_,_},{_,_Rtk}]} = ejson:decode(Json),
+    Uid = bitstring_to_list(_Uid),
+    Atk = bitstring_to_list(_Atk),
+    Rtk = bitstring_to_list(_Rtk),
+    ets:insert(?TokenTbl, {Code, {Uid, Atk, Rtk}}),
+    {json, Json}.
 
 refresh_token(Code) ->
     gen_server:call(?MODULE, {refresh_token, Code}).
@@ -95,39 +157,3 @@ block(Code, UserId) ->
 
 search_user(Text) ->
     gen_server:call(?MODULE, {search_user, Text}).
-
-%%-----------------------------------------------------------------------------
-%%  Callback
-%%-----------------------------------------------------------------------------
-init([AppKey, Secret, URI]) ->
-    ok = inets:start(),
-    ok = ssl:start(),
-    % ets_key()   -> access_code()
-    % ets_value() -> {userid(), access_token(), refresh_token(), expire()}
-    T = ets:new(anonyms, [set, private]),
-    {ok, #state{appkey=AppKey, secret=Secret, uri=URI, table=T}}.
-
-handle_call({access_token, Code}, _From, State) ->
-    #state{appkey=AppKey, secret=Secret, uri=URI} = State,
-    Request = "https://www.douban.com/service/auth2/token?client_id=" ++
-              AppKey ++ "&client_secret=" ++ Secret ++ "&redirect_uri=" ++
-              URI ++ "&grant_type=authorization_code&code=" ++ Code,
-    Reply = httpc:request(post, {Request, []}, [], []),
-    {reply, Reply, State}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-%%-----------------------------------------------------------------------------
-%%  Internal
-%%-----------------------------------------------------------------------------
-
