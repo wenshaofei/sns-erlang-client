@@ -71,7 +71,7 @@ handle_call({access_token, Code}, _From, State) ->
     Body = "client_id=" ++ Apikey ++ "&client_secret=" ++ Secret ++ 
            "&redirect_uri=" ++ Uri ++ "&grant_type=authorization_code&code=" 
            ++ Code,
-    Result = request(post, Url, Body), 
+    Result = request("", Url, Body), 
     Reply = case Result of
         {error, X} -> {error, X};
         Json -> save_token(Code, Json)  % {json, Json}
@@ -87,7 +87,7 @@ handle_call({refresh_token, Code}, _From, State) ->
             Body = "client_id=" ++ Apikey ++ "&client_secret=" ++ 
                    Secret ++ "&redirect_uri=" ++ Uri ++ 
                    "&grant_type=refresh_token&refresh_token=" ++ Rtk,
-            Result = request(post, Url, Body),
+            Result = request("", Url, Body),
             Reply = case Result of 
                 {error, X} -> {error, X};
                 Json -> save_token(Code, Json)  % {json, Json}
@@ -104,13 +104,41 @@ handle_call({home_timeline, Code, N}, _From, State) ->
     end,
     {reply, Reply, State};
 
-handle_call({home_timeline, Code, MaxId, N}, _From, State) ->
+handle_call({home_timeline, Code, N, MaxId}, _From, State) ->
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> no_access_token;
         [{Code, {_, Atk, _}}] ->
             request(Atk, ?HttpsApi ++ "shuo/v2/statuses/home_timeline"
                     ++ "?count=" ++ integer_to_list(N)
                     ++ "&until_id=" ++ integer_to_list(MaxId))
+    end,
+    {reply, Reply, State};
+
+handle_call({user_timeline, Code, User, N}, _From, State) ->
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> no_access_token;
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi++"shuo/v2/statuses/user_timeline/"++User
+                    ++ "?count=" ++ integer_to_list(N))
+    end,
+    {reply, Reply, State};
+
+handle_call({user_timeline, Code, User, N, MaxId}, _From, State) ->
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> no_access_token;
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi++"shuo/v2/statuses/user_timeline/"++User
+                    ++ "?count=" ++ integer_to_list(N)
+                    ++ "&until_id=" ++ integer_to_list(MaxId))
+    end,
+    {reply, Reply, State};
+
+handle_call({reshare, Code, StatId}, _From, State) ->
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> no_access_token;
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi ++ "shuo/v2/statuses/"
+                    ++ integer_to_list(StatId) ++ "/reshare", "")
     end,
     {reply, Reply, State}.
 
@@ -130,9 +158,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%-----------------------------------------------------------------------------
 %%  Internal
 %%-----------------------------------------------------------------------------
-request(post, Url, Body) ->
+request(Token, Url, Body) ->
+    Header = case Token of
+        "" -> [];
+        _ -> [{"Authorization", "Bearer "++Token}]
+    end,
     Result = httpc:request(post, 
-             {Url,[],"application/x-www-form-urlencoded",Body},
+             {Url,Header,"application/x-www-form-urlencoded",Body},
              [], [{full_result,false}]),
     case Result of
         {ok, {200, Json}} -> Json;
@@ -156,13 +188,6 @@ save_token(Code, Json) ->
     Rtk = bitstring_to_list(_Rtk),
     ets:insert(?TokenTbl, {Code, {Uid, Atk, Rtk}}),
     {json, Json}.
-
-% home_timeline(Token, [1, 50]) will return 50 newest statuses
-home_timeline(Token, [A, B]) ->
-    gen_server:call(?MODULE, {home_timeline, Token, [A, B]}).
-
-user_timeline(UserId, [A, B]) ->
-    gen_server:call(?MODULE, {user_timeline, UserId, [A, B]}).
 
 % Content -> [content()]
 % content() -> {text, Text}   | {image, Bytes} | 
