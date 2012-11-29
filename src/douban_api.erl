@@ -79,20 +79,20 @@ handle_call({access_token, Code}, _From, State) ->
 
 handle_call({refresh_token, Code}, _From, State) ->
     #state{appkey=AppKey, secret=Secret, uri=Uri} = State,
-    Reply = case ets:lookup(?TokenTbl, Code) of
-        [] -> gen_server:call(self(), {access_token, Code});
+    case ets:lookup(?TokenTbl, Code) of
+        [] -> handle_call({access_token, Code}, self(), State);
         [{Code, {_, _, Rtk}}] -> 
             Url = "https://www.douban.com/service/auth2/token",
             Body = "client_id=" ++ AppKey ++ "&client_secret=" ++ 
                    Secret ++ "&redirect_uri=" ++ Uri ++ 
                    "&grant_type=refresh_token&refresh_token=" ++ Rtk,
             Result = request(post, Url, Body),
-            case Result of 
+            Reply = case Result of 
                 {error, X} -> {error, X};
                 Json -> save_token(Code, Json)  % {json, Json}
-            end
-    end,
-    {reply, Reply, State}.
+            end,
+            {reply, Reply, State}
+    end.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -122,7 +122,7 @@ request(post, Url, Body) ->
     end.
 
 save_token(Code, Json) ->
-    {[{_,_Atk},{_,_Uid},{_,_},{_,_Rtk}]} = ejson:decode(Json),
+    {[{_,_Atk},{_,_Uid},{_,_},{_,_Rtk}]} = mochijson2:decode(Json),
     Uid = bitstring_to_list(_Uid),
     Atk = bitstring_to_list(_Atk),
     Rtk = bitstring_to_list(_Rtk),
