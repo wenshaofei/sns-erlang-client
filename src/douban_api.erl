@@ -84,7 +84,7 @@ handle_call({access_token}, _From, State) ->
 handle_call({refresh_token}, _From, State) ->
     #state{code=Code} = State,
     case ets:lookup(?TokenTbl, Code) of
-        [] -> handle_call({access_token, Code}, self(), State);
+        [] -> handle_call({access_token}, self(), State);
         [{Code, {_, _, Rtk}}] -> 
             Url = "https://www.douban.com/service/auth2/token",
             Body = "client_id=" ++ ?Apikey ++ "&client_secret=" ++ 
@@ -162,12 +162,13 @@ handle_call({delete, StatId}, _From, State) ->
 
 handle_call({comment, StatId, Text}, _From, State) ->
     #state{code=Code} = State,
+    UriText = encode_uri_rfc3986:encode(Text),
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> {error, no_access_token};
         [{Code, {_, Atk, _}}] ->
             httpost(Atk, ?HttpsApi ++ "shuo/v2/statuses/" 
                     ++ integer_to_list(StatId) ++ "/comments",
-                    "text=" ++ Text)
+                    "text=" ++ UriText)
     end,
     {reply, Reply, State};
 
@@ -205,19 +206,17 @@ handle_call({following, User}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> {error, no_access_token};
-        [{Code, {_, Atk, _}}] ->
-            httpget(Atk, ?HttpsApi ++ "shuo/v2/users/" ++ User
-                    ++ "/following")
+        _ -> httpget("", ?HttpApi ++ "shuo/v2/users/" ++ User
+                     ++ "/following?apikey=" ++ ?Apikey)
     end,
     {reply, Reply, State};
 
-handle_call({follower, User}, _From, State) ->
+handle_call({followers, User}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> {error, no_access_token};
-        [{Code, {_, Atk, _}}] ->
-            httpget(Atk, ?HttpsApi ++ "shuo/v2/users/" ++ User
-                    ++ "/followers")
+        _ -> httpget("", ?HttpApi ++ "shuo/v2/users/" ++ User
+                     ++ "/followers?apikey=" ++ ?Apikey)
     end,
     {reply, Reply, State};
 
@@ -226,8 +225,8 @@ handle_call({follow, User}, _From, State) ->
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> {error, no_access_token};
         [{Code, {_, Atk, _}}] ->
-            httpost(Atk, ?HttpsApi ++ "shuo/v2/friendships/create",
-                    "source=" ++ ?Apikey ++ "&user_id=" ++ User)
+            httpost(Atk, ?HttpsApi ++ "shuo/friendships/create", 
+                    "user_id=" ++ User)
     end,
     {reply, Reply, State};
 
@@ -236,8 +235,8 @@ handle_call({unfollow, User}, _From, State) ->
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> {error, no_access_token};
         [{Code, {_, Atk, _}}] ->
-            httpost(Atk, ?HttpsApi ++ "shuo/v2/friendships/destroy",
-                    "source=" ++ ?Apikey ++ "&user_id=" ++ User)
+            httpost(Atk, ?HttpsApi ++ "shuo/friendships/destroy",
+                    "user_id=" ++ User)
     end,
     {reply, Reply, State};
 
@@ -246,17 +245,17 @@ handle_call({block, User}, _From, State) ->
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> {error, no_access_token};
         [{Code, {_, Atk, _}}] ->
-            httpost(Atk, ?HttpsApi ++ "shuo/v2/users/"
-                    ++ User ++ "/block", "")
+            httpost(Atk, ?HttpsApi ++ "shuo/users/" ++ User ++ "/block", "")
     end,
     {reply, Reply, State};
 
-handle_call({search_user, User}, _From, State) ->
+handle_call({search_user, Text}, _From, State) ->
     #state{code=Code} = State,
+    UriText = encode_uri_rfc3986:encode(Text),
     Reply = case ets:lookup(?TokenTbl, Code) of
         [] -> {error, no_access_token};
-        [{Code, {_, Atk, _}}] ->
-            httpget(Atk, ?HttpsApi ++ "shuo/v2/users/search?q=" ++ User)
+        _ -> httpget("", ?HttpApi ++ "shuo/v2/users/search?q=" ++ UriText
+                     ++ "&apikey=" ++ ?Apikey)
     end,
     {reply, Reply, State};
 
@@ -296,7 +295,10 @@ httpost(Token, Url, Body) ->
     end.
 
 httpget(Token, Url) ->
-    Header = [{"Authorization", "Bearer "++Token}],
+    Header = case Token of
+        "" -> [];
+        _ -> [{"Authorization", "Bearer "++Token}]
+    end,
     Result = httpc:request(get, {Url,Header}, [], [{full_result,false}]),
     case Result of
         {ok, {200, Json}} -> {json, Json};
