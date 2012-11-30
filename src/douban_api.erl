@@ -24,7 +24,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/1, start_link/2, call/1, call/2]).
+-export([start/1, start/2, call/1, call/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -41,11 +41,19 @@
 %%-----------------------------------------------------------------------------
 %%  API
 %%-----------------------------------------------------------------------------
-start_link(Code) ->
-    start_link(?MODULE, Code).
+start(Code) ->
+    start(?MODULE, Code, infinity).
 
-start_link(Server, Code) ->
-    gen_server:start_link({local, Server}, ?MODULE, [Code], []).
+start(Server, Code, Timeout) ->
+    inets:start(),
+    ssl:start(),
+    case lists:member(?TokenTbl, ets:all()) of
+        % key()   -> access_code()
+        % value() -> {userid(), access_token(), refresh_token()}
+        false -> ets:new(?TokenTbl, [named_table, set, public]);
+        true -> pass
+    end,
+    gen_server:start({local, Server}, ?MODULE, [Code, Timeout], []).
 
 call(Request) when is_tuple(Request) ->
     gen_server:call(?MODULE, Request).
@@ -56,16 +64,8 @@ call(Server, Request) when is_tuple(Request) ->
 %%-----------------------------------------------------------------------------
 %%  Callback
 %%-----------------------------------------------------------------------------
-init([Code]) ->
-    inets:start(),
-    ssl:start(),
-    case lists:member(?TokenTbl, ets:all()) of
-        % key()   -> access_code()
-        % value() -> {userid(), access_token(), refresh_token()}
-        false -> ets:new(?TokenTbl, [named_table, set, public]);
-        true -> pass
-    end,
-    {ok, #state{code=Code}}.
+init([Code, Timeout]) ->
+    {ok, #state{code=Code}, Timeout}.
 
 %%-----------------------------------------------------------------------------
 handle_call({access_token}, _From, State) ->
@@ -101,7 +101,7 @@ handle_call({refresh_token}, _From, State) ->
 handle_call({home_timeline, N}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
-        [] -> no_access_token;
+        [] -> {error, no_access_token},
         [{Code, {_, Atk, _}}] ->
             request(Atk, ?HttpsApi ++ "shuo/v2/statuses/home_timeline"
                     ++ "?count=" ++ integer_to_list(N))
@@ -111,7 +111,7 @@ handle_call({home_timeline, N}, _From, State) ->
 handle_call({home_timeline, N, MaxId}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
-        [] -> no_access_token;
+        [] -> {error, no_access_token},
         [{Code, {_, Atk, _}}] ->
             request(Atk, ?HttpsApi ++ "shuo/v2/statuses/home_timeline"
                     ++ "?count=" ++ integer_to_list(N)
@@ -122,7 +122,7 @@ handle_call({home_timeline, N, MaxId}, _From, State) ->
 handle_call({user_timeline, User, N}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
-        [] -> no_access_token;
+        [] -> {error, no_access_token},
         [{Code, {_, Atk, _}}] ->
             request(Atk, ?HttpsApi++"shuo/v2/statuses/user_timeline/"++User
                     ++ "?count=" ++ integer_to_list(N))
@@ -132,7 +132,7 @@ handle_call({user_timeline, User, N}, _From, State) ->
 handle_call({user_timeline, User, N, MaxId}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
-        [] -> no_access_token;
+        [] -> {error, no_access_token},
         [{Code, {_, Atk, _}}] ->
             request(Atk, ?HttpsApi++"shuo/v2/statuses/user_timeline/"++User
                     ++ "?count=" ++ integer_to_list(N)
@@ -143,7 +143,7 @@ handle_call({user_timeline, User, N, MaxId}, _From, State) ->
 handle_call({reshare, StatId}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
-        [] -> no_access_token;
+        [] -> {error, no_access_token},
         [{Code, {_, Atk, _}}] ->
             request(Atk, ?HttpsApi ++ "shuo/v2/statuses/"
                     ++ integer_to_list(StatId) ++ "/reshare", "")
@@ -153,27 +153,103 @@ handle_call({reshare, StatId}, _From, State) ->
 handle_call({delete, StatId}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
-        [] -> no_access_token;
+        [] -> {error, no_access_token},
         [{Code, {_, Atk, _}}] ->
-            delete(Atk, ?HttpsApi ++ "shuo/v2/statuses/" 
-                   ++ integer_to_list(StatId))
+            requestd(Atk, ?HttpsApi ++ "shuo/v2/statuses/" 
+                     ++ integer_to_list(StatId))
     end,
     {reply, Reply, State};
 
 handle_call({comment, StatId, Text}, _From, State) ->
     #state{code=Code} = State,
     Reply = case ets:lookup(?TokenTbl, Code) of
-        [] -> no_access_token;
+        [] -> {error, no_access_token},
         [{Code, {_, Atk, _}}] ->
             request(Atk, ?HttpsApi ++ "shuo/v2/statuses/" 
-                   ++ integer_to_list(StatId))
+                    ++ integer_to_list(StatId) ++ "/comments",
+                    "text=" ++ Text)
     end,
-    {reply, Reply, State}.
+    {reply, Reply, State};
+
+handle_call({comment_list, StatId}, _From, State) ->
+    #state{code=Code} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> {error, no_access_token},
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi ++ "shuo/v2/statuses/" 
+                    ++ integer_to_list(StatId) ++ "/comments")
+    end,
+    {reply, Reply, State};
+
+handle_call({get_comment, StatId}, _From, State) ->
+    #state{code=Code} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> {error, no_access_token},
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi ++ "shuo/v2/statuses/comment/" 
+                    ++ integer_to_list(StatId))
+    end,
+    {reply, Reply, State};
+
+handle_call({delete_comment, StatId}, _From, State) ->
+    #state{code=Code} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> {error, no_access_token},
+        [{Code, {_, Atk, _}}] ->
+            requestd(Atk, ?HttpsApi ++ "shuo/v2/statuses/comment/" 
+                     ++ integer_to_list(StatId))
+    end,
+    {reply, Reply, State};
+
+handle_call({following, User}, _From, State) ->
+    #state{code=Code} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> {error, no_access_token},
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi ++ "shuo/v2/users/" ++ User
+                    ++ "/following")
+    end,
+    {reply, Reply, State};
+
+handle_call({follower, User}, _From, State) ->
+    #state{code=Code} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> {error, no_access_token},
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi ++ "shuo/v2/users/" ++ User
+                    ++ "/followers")
+    end,
+    {reply, Reply, State};
+
+handle_call({follow, User}, _From, State) ->
+    #state{code=Code} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> {error, no_access_token};
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi ++ "shuo/v2/friendships/create",
+                    "source=" ++ ?Apikey ++ "&user_id=" ++ User)
+    end,
+    {reply, Reply, State};
+
+handle_call({unfollow, User}, _From, State) ->
+    #state{code=Code} = State,
+    Reply = case ets:lookup(?TokenTbl, Code) of
+        [] -> {error, no_access_token};
+        [{Code, {_, Atk, _}}] ->
+            request(Atk, ?HttpsApi ++ "shuo/v2/friendships/destroy",
+                    "source=" ++ ?Apikey ++ "&user_id=" ++ User)
+    end,
+    {reply, Reply, State};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, invalid_request}, State}.
 
 %%-----------------------------------------------------------------------------
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info(timeout, State) ->
+    {reply, {error, timeout}, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -209,7 +285,7 @@ request(Token, Url) ->
         X -> {error, X}
     end.
 
-delete(Token, Url) ->
+requestd(Token, Url) ->
     Header = [{"Authorization", "Bearer "++Token}],
     Result = httpc:request(delete, {Url,Header}, [], [{full_result,false}]),
     case Result of
@@ -231,24 +307,6 @@ save_token(Code, Json) ->
 %              {title, Title} | {url, Url}     | {desc, Desc}
 update(Code, Content) when is_list(Content) ->
     gen_server:call(?MODULE, {update, Code, Content}).
-
-comment(Code, Text) ->
-    gen_server:call(?MODULE, {comment, Code, Text}).
-
-comment_list(StatId) ->
-    gen_server:call(?MODULE, {comment_list, StatId}).
-
-get_comment(CommId) ->
-    gen_server:call(?MODULE, {get_comment, CommId}).
-
-delete_comment(Code, CommId) ->
-    gen_server:call(?MODULE, {delete_comment, Code, CommId}).
-
-follow(Code, UserId) ->
-    gen_server:call(?MODULE, {follow, Code, UserId}).
-
-unfollow(Code, UserId) ->
-    gen_server:call(?MODULE, {unfollow, Code, UserId}).
 
 block(Code, UserId) ->
     gen_server:call(?MODULE, {block, Code, UserId}).
