@@ -72,11 +72,12 @@ handle_call({access_token}, _From, State) ->
     Result = httpost("", Url, Body), 
     case Result of
         {error, X} -> {reply, {error, X}, State};
-        Json -> {[{_,A},{_,U},{_,_},{_,R}]} = mochijson2:decode(Json),
-                Uid = bitstring_to_list(U),
-                Atk = bitstring_to_list(A),
-                Rtk = bitstring_to_list(R),
-                {reply, {Code,Uid,Atk,Rtk}, State#state{atk=Atk, rtk=Rtk}}
+        {json, Json} -> 
+            {[{_,A},{_,_},{_,_},{_,R}]} = mochijson2:decode(Json),
+            Atk = bitstring_to_list(A),
+            Rtk = bitstring_to_list(R),
+            {json, Info} = httpget(Atk, ?HttpsApi ++ "v2/user/~me"),
+            {reply, {Code,Atk,Rtk,Info}, State#state{atk=Atk, rtk=Rtk}}
     end;
 
 handle_call({refresh_token}, _From, State) ->
@@ -88,19 +89,12 @@ handle_call({refresh_token}, _From, State) ->
     Result = httpost("", Url, Body),
     case Result of
         {error, X} -> {reply, {error, X}, State};
-        Json -> {[{_,A},{_,U},{_,_},{_,R}]} = mochijson2:decode(Json),
-                Uid = bitstring_to_list(U),
-                Atk = bitstring_to_list(A),
-                Rtk = bitstring_to_list(R),
-                {reply, {Code,Uid,Atk,Rtk}, State#state{atk=Atk, rtk=Rtk}}
+        {json, Json} -> 
+            {[{_,A},{_,_},{_,_},{_,R}]} = mochijson2:decode(Json),
+            Atk = bitstring_to_list(A),
+            Rtk = bitstring_to_list(R),
+            {reply, {Code,Atk,Rtk}, State#state{atk=Atk, rtk=Rtk}}
     end;
-
-handle_call({update, Text}, _From, State) ->
-    #state{atk=Atk} = State,
-    UriText = encode_uri_rfc3986:encode(Text),
-    Reply = httpost(Atk, ?HttpsApi ++ "shuo/v2/statuses/",
-                    "text=" ++ UriText),
-    {reply, Reply, State};
 
 handle_call({home_timeline, N}, _From, State) ->
     #state{atk=Atk} = State,
@@ -126,6 +120,30 @@ handle_call({user_timeline, User, N, MaxId}, _From, State) ->
     Reply = httpget(Atk, ?HttpsApi++"shuo/v2/statuses/user_timeline/"
                     ++ User ++ "?count=" ++ integer_to_list(N)
                     ++ "&until_id=" ++ integer_to_list(MaxId)),
+    {reply, Reply, State};
+
+handle_call({update, Text}, _From, State) ->
+    #state{atk=Atk} = State,
+    UriText = encode_uri_rfc3986:encode(Text),
+    Reply = httpost(Atk, ?HttpsApi ++ "shuo/v2/statuses/",
+                    "text=" ++ UriText),
+    {reply, Reply, State};
+
+% a very rude implementation
+handle_call({update, Text, ImgPath}, _From, State) ->
+    #state{atk=Atk} = State,
+    Cmd = "curl \"" ++ ?HttpsApi ++ "shuo/v2/statuses/\" -H "
+          ++ "\"Authorization: Bearer " ++ Atk ++ "\" -F \"text=" 
+          ++ Text ++ "\" -F \"image=@" ++ ImgPath ++ "\"",
+    {_, A, B} = now(),
+    TmpFile = ".curl." ++ integer_to_list(A * 1000000 + B),
+    file:write_file(TmpFile, unicode:characters_to_binary(Cmd), [binary]),
+    Str = os:cmd("sh " ++ TmpFile),
+    Reply = case string:str(Str, "{\"category\"") of
+        1 -> {json, Str};
+        _ -> {error, Str}
+    end,
+    file:delete(TmpFile),
     {reply, Reply, State};
 
 handle_call({reshare, StatId}, _From, State) ->
@@ -227,7 +245,7 @@ httpost(Token, Url, Body) ->
              {Url,Header,"application/x-www-form-urlencoded",Body},
              [], [{full_result,false}]),
     case Result of
-        {ok, {200, Json}} -> Json;
+        {ok, {200, Json}} -> {json, Json};
         {ok, X} -> {error, X};
         X -> {error, X}
     end.
