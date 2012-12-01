@@ -139,8 +139,8 @@ handle_call({update, Text, ImgPath}, _From, State) ->
     TmpFile = ".curl." ++ integer_to_list(A * 1000000 + B),
     file:write_file(TmpFile, unicode:characters_to_binary(Cmd), [binary]),
     Str = os:cmd("sh " ++ TmpFile),
-    Reply = case string:str(Str, "{\"category\":") 
-                 * string:str(Str, "comments_count") of
+    Reply = case string:str(Str, "{\"category\":") * 
+                 string:str(Str, "comments_count") of
         0 -> {error, Str};
         _ -> {json, Str}
     end,
