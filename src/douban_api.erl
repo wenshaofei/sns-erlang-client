@@ -129,7 +129,7 @@ handle_call({update, Text}, _From, State) ->
                     "text=" ++ UriText),
     {reply, Reply, State};
 
-% a very rude implementation
+% a very rude implement
 handle_call({update, Text, ImgPath}, _From, State) ->
     #state{atk=Atk} = State,
     Cmd = "curl -s \"" ++ ?HttpsApi ++ "shuo/v2/statuses/\" -H "
