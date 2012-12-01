@@ -132,16 +132,18 @@ handle_call({update, Text}, _From, State) ->
 % a very rude implementation
 handle_call({update, Text, ImgPath}, _From, State) ->
     #state{atk=Atk} = State,
-    Cmd = "curl \"" ++ ?HttpsApi ++ "shuo/v2/statuses/\" -H "
+    Cmd = "curl -s \"" ++ ?HttpsApi ++ "shuo/v2/statuses/\" -H "
           ++ "\"Authorization: Bearer " ++ Atk ++ "\" -F \"text=" 
           ++ Text ++ "\" -F \"image=@" ++ ImgPath ++ "\"",
     {_, A, B} = now(),
     TmpFile = ".curl." ++ integer_to_list(A * 1000000 + B),
     file:write_file(TmpFile, unicode:characters_to_binary(Cmd), [binary]),
     Str = os:cmd("sh " ++ TmpFile),
-    Reply = case string:str(Str, "{\"category\"") of
-        1 -> {json, Str};
-        _ -> {error, Str}
+    Reply = case string:str(Str, "{\"category\":") 
+                 * string:str(Str, "like_count") 
+                 * string:str(Str, "comments_count") of
+        0 -> {error, Str};
+        _ -> {json, Str}
     end,
     file:delete(TmpFile),
     {reply, Reply, State};
@@ -209,6 +211,11 @@ handle_call({unfollow, User}, _From, State) ->
 handle_call({block, User}, _From, State) ->
     #state{atk=Atk} = State,
     Reply = httpost(Atk, ?HttpsApi ++ "shuo/users/" ++ User ++ "/block", ""),
+    {reply, Reply, State};
+
+handle_call({unblock, User}, _From, State) ->
+    #state{atk=Atk} = State,
+    Reply = httpost(Atk, ?HttpsApi ++ "shuo/users/" ++ User ++ "/unblock", ""),
     {reply, Reply, State};
 
 handle_call({search_user, Text}, _From, State) ->
