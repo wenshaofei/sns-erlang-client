@@ -48,8 +48,8 @@ start(Server, Args) ->
     ssl:start(),
     gen_server:start({local, Server}, ?MODULE, Args, []).
 
-% call(Request) -> {json, Json}
-%               -> {error, Why}
+% call(Request) -> {Code, Atk, Rtk, UserInfoJson} | {Code, NewAtk, NewRtk}
+%                  | {json, Json} | {error, Why}
 call(Request) when is_tuple(Request) ->
     call(?MODULE, Request).
 
