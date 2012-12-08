@@ -35,7 +35,7 @@
 -define(HttpsApi, "https://api.douban.com/").
 -define(Apikey, "0c7a9b3c6305f6b4256fd1b52911e41c").
 -define(Secret, "ce9e5a76d5fc4f83").
--define(Uri, "http://222.201.177.33:9000").
+-define(Uri, "http://www.luanup24.com").
 
 %%-----------------------------------------------------------------------------
 %%  API
