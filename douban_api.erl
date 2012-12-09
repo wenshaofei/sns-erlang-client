@@ -24,7 +24,7 @@
 
 -behaviour(gen_server).
 
--export([start/1, start/2, call/1, call/2]).
+-export([start/1, start/2, call/1, call/2, exit/0, exit/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -48,13 +48,19 @@ start(Server, Args) ->
     ssl:start(),
     gen_server:start({local, Server}, ?MODULE, Args, []).
 
-% call(Request) -> {Code, Atk, Rtk, UserInfoJson} | {Code, NewAtk, NewRtk}
-%                  | {json, Json} | {error, Why}
+% call(Request) -> {Code, Atk, Rtk, UserInfoJson} | {json, Json}
+%                  | {Code, NewAtk, NewRtk} | {error, Why}
 call(Request) when is_tuple(Request) ->
     call(?MODULE, Request).
 
 call(Server, Request) when is_tuple(Request) ->
     gen_server:call(Server, Request).
+    
+exit() ->
+    erlang:exit(whereis(?MODULE), 'EXIT').
+    
+exit(Server) ->
+    erlang:exit(whereis(Server), 'EXIT').
     
 %%-----------------------------------------------------------------------------
 %%  Callback
